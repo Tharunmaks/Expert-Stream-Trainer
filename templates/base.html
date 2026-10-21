@@ -12,6 +12,6 @@ button,.btn{font:500 14px var(--f-body);background:var(--blue);color:#fff;border
 button.ghost{background:var(--raise);color:var(--ink);border:1px solid var(--line)}button.stop{background:var(--bad)}
 code,pre,textarea,input{font-family:var(--f-mono);font-size:13px}.mono{font-family:var(--f-mono)}
 </style>{% block head %}{% endblock %}</head><body>
-<nav><b>ExpertStream <span style="color:var(--dim);font-weight:400">Trainer</span></b><a href="/" class="on">Notebook</a><a href="{{site_url}}/run">Run</a><a href="{{site_url}}/">Plans</a>
+<nav><b>ExpertStream <span style="color:var(--dim);font-weight:400">Trainer</span></b><a href="/" class="{{ 'on' if request.path == '/' }}">Notebook</a><a href="/moe" class="{{ 'on' if request.path == '/moe' }}">Train MoE</a><a href="{{site_url}}/run">Run</a><a href="{{site_url}}/">Plans</a>
 <span style="margin-left:auto;color:var(--dim);font-size:13px">{% if user %}{{user.email}} · {{ sub or 'Expert Stream Starter' }} · <a href="{{site_url}}/" style="color:var(--warm)">Upgrade</a> · <a href="{{site_url}}/logout">Log out</a>{% endif %}</span></nav>
 <main>{% block body %}{% endblock %}</main></body></html>

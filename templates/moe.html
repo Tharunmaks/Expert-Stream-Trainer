@@ -1,0 +1,40 @@
+{% extends "base.html" %}{% block t %}Train MoE · ExpertStream{% endblock %}
+{% block head %}<style>
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.f label{display:block;font:12px var(--f-mono);color:var(--dim);margin:0 0 6px}
+.f select,.f input,.f textarea{width:100%;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:9px 12px}
+.f textarea{min-height:90px;resize:vertical}.bar{display:flex;gap:10px;align-items:center;margin:20px 0}.st{margin-left:auto;font:13px var(--f-mono);color:var(--dim)}
+.k{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0}.k div{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+.k b{display:block;font:600 22px var(--f-display)}.k span{font:12px var(--f-mono);color:var(--dim)}
+#out{background:#050810;border:1px solid var(--line);border-radius:10px;padding:14px;min-height:120px;max-height:300px;overflow:auto;white-space:pre-wrap;margin:0}
+canvas{width:100%;height:180px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+</style>{% endblock %}
+{% block body %}
+<h1>Train MoE</h1><p class="sub">Sparse-backprop training of a mixture-of-experts on CPU. The expert weights are frozen random int4 streamed from disk; a job trains LoRA rank 4 on every routed expert, plus the routers, embedding and output head. Up to 4 threads at nice 10. When it finishes or you press Stop, the checkpoint is saved and added to your library, so it shows up in <a href="{{site_url}}/run" style="color:var(--blue)">Run</a>.</p>
+<p class="sub mono" style="font-size:12.5px">Plan: {{ sub or 'Expert Stream Starter (free)' }} · {{limits.jobs}} job(s) · {{limits.cpu_hours}} h CPU per job · up to {{'{:,}'.format(limits.max_steps|int)}} steps · {{ '{:g}'.format(limits.max_params/1e6) }}M active params per token{% if not sub %} · <a href="{{site_url}}/" style="color:var(--warm)">Upgrade to Expert One</a>{% endif %}</p>
+<form id="f" class="card f"><div class="grid">
+<div><label>Size</label><select name="preset">{% for k,p in presets.items() %}<option value="{{k}}" {% if p.active > limits.max_params %}disabled{% endif %}>{{p.label}} · {{ '{:.1f}'.format(p.active/1e6) }}M active{% if p.active > limits.max_params %} · needs a higher plan{% endif %}</option>{% endfor %}</select></div>
+<div><label>Method</label><select name="mode"><option value="p6">--p6 (checkpointed, expert-parallel)</option><option value="plain">--sparse (plain)</option></select></div>
+<div><label>Steps</label><input name="steps" type="number" min="1" max="{{limits.max_steps|int}}" value="{{ [120, limits.max_steps|int]|min }}"></div>
+<div><label>Threads (max 4)</label><input name="threads" type="number" min="1" max="4" value="2"></div>
+<div><label>Model name</label><input name="name" value="my-moe"></div>
+<div><label>Dataset file (.txt, optional)</label><input name="file" type="file" accept=".txt,text/plain"></div>
+</div><div style="margin-top:16px"><label>Or paste text (leave both empty to use the built-in public-domain Project Gutenberg corpus{% if not corpus %}, not installed on this server{% endif %})</label><textarea name="text" spellcheck="false" placeholder="paste at least 8 KB of text"></textarea></div></form>
+<div class="bar"><button id="go">Start training</button><button id="stop" class="stop" disabled>Stop &amp; save</button><span class="st" id="st">idle</span></div>
+<div class="k"><div><span>step</span><b id="ks">–</b></div><div><span>train loss</span><b id="kl">–</b></div><div><span>held-out loss</span><b id="kh">–</b></div><div><span>train tok/s</span><b id="kt">–</b></div></div>
+<canvas id="cv" width="1056" height="180"></canvas><h2>Log</h2><pre id="out"></pre>
+<h2>Your trained MoE models</h2><div class="sub mono" style="font-size:13px" id="ml">{% for m in models %}{{m.name}} · {{'{:,}'.format(m.total_params|int)}} params · held-out {{ m.meta.train.heldout_before if m.meta.train else '' }} → {{ m.meta.train.heldout_after if m.meta.train else '' }}<br>{% else %}None yet.{% endfor %}</div>
+<script>
+const $=id=>document.getElementById(id),out=$('out'),cv=$('cv'),cx=cv.getContext('2d');let job=null,tr=[],ho=[],h0=null;
+function draw(){cx.clearRect(0,0,cv.width,cv.height);const all=tr.map(p=>p[1]).concat(ho.map(p=>p[1]));if(!all.length)return;const mx=Math.max(...all),mn=Math.min(...all,0),n=Math.max(...tr.map(p=>p[0]),1);
+ const X=s=>16+(cv.width-32)*s/n,Y=v=>cv.height-16-(cv.height-32)*(v-mn)/((mx-mn)||1);
+ [[tr,'#3987e5'],[ho,'#19b07d']].forEach(([a,c])=>{cx.strokeStyle=c;cx.lineWidth=2;cx.beginPath();a.forEach((p,i)=>i?cx.lineTo(X(p[0]),Y(p[1])):cx.moveTo(X(p[0]),Y(p[1])));cx.stroke();a.forEach(p=>{cx.fillStyle=c;cx.fillRect(X(p[0])-2,Y(p[1])-2,4,4)})});
+ cx.fillStyle='#8d9ab3';cx.font='12px IBM Plex Mono, monospace';cx.fillText('train loss',20,18);cx.fillStyle='#19b07d';cx.fillText('held-out',110,18)}
+function line(t){out.textContent+=t+'\n';out.scrollTop=out.scrollHeight;let m=t.match(/^step (\d+) train_ce ([\d.]+).*?train_tok\/s ([\d.]+)/);
+ if(m){tr.push([+m[1],+m[2]]);$('ks').textContent=m[1];$('kl').textContent=(+m[2]).toFixed(3);$('kt').textContent=Math.round(+m[3]);draw()}
+ m=t.match(/heldout_loss ([\d.]+)/);if(m){const s=tr.length?tr[tr.length-1][0]:0;ho.push([s,+m[1]]);if(h0===null)h0=+m[1];$('kh').textContent=(h0!==null&&ho.length>1?h0.toFixed(3)+' → ':'')+(+m[1]).toFixed(3);draw()}}
+$('go').onclick=async()=>{out.textContent='';tr=[];ho=[];h0=null;draw();const r=await fetch('/api/moe/start',{method:'POST',body:new FormData($('f'))});const jr=await r.json();
+ if(!r.ok){out.textContent=jr.error||'error';return}job=jr.job_id;$('st').textContent='running · job '+job;$('go').disabled=true;$('stop').disabled=false;
+ const es=new EventSource('/api/logs/'+job);es.onmessage=e=>line(JSON.parse(e.data));
+ es.addEventListener('done',()=>{es.close();$('st').textContent='finished · job '+job;$('go').disabled=false;$('stop').disabled=true})};
+$('stop').onclick=()=>{fetch('/api/stop/'+job,{method:'POST'});$('st').textContent='stopping: final eval + save…'};
+</script>{% endblock %}
