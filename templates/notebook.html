@@ -1,0 +1,29 @@
+{% extends "base.html" %}{% block t %}Notebook · ExpertStream{% endblock %}
+{% block head %}<style>
+.bar{display:flex;gap:10px;align-items:center;margin:20px 0}.st{margin-left:auto;font:13px var(--f-mono);color:var(--dim)}
+.cell{display:grid;grid-template-columns:44px 1fr;margin-bottom:10px}.n{font:12px var(--f-mono);color:var(--dim);padding-top:12px}
+textarea{width:100%;min-height:96px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:12px;resize:vertical;line-height:1.5}
+textarea:focus{outline:none;border-color:var(--blue)}#out{background:#050810;border:1px solid var(--line);border-radius:10px;padding:14px;min-height:160px;max-height:420px;overflow:auto;white-space:pre-wrap;margin:0}
+</style>{% endblock %}
+{% block body %}
+<h1>Notebook</h1><p class="sub">Write Python in cells. Run sends every cell to one CPU job on the server: a sandboxed process with its own temp folder, 2 threads, a CPU-time cap and a memory cap. Output streams below; Stop ends it. Save a model into <span class="mono">./model/</span> and it joins your library.</p>
+<p class="sub mono" style="font-size:12.5px">Plan: {{ sub or 'Expert Stream Starter (free)' }} · {{limits.jobs}} job(s) · {{limits.cpu_hours}} h CPU per job · models up to {{'{:,}'.format(limits.max_params|int)}} params{% if not sub %} · <a href="{{site_url}}/" style="color:var(--warm)">Upgrade to Expert One</a>{% endif %}</p>
+<div class="bar"><button id="run">Run all</button><button id="stop" class="stop" disabled>Stop</button><button id="add" class="ghost">Add cell</button><input id="name" placeholder="model name" value="tiny-moe" style="width:160px;padding:9px 12px;font-family:var(--f-mono);font-size:13px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px"><span class="st" id="st">idle</span></div>
+<div id="cells"></div><h2>Output</h2><pre id="out"></pre><h2>Your models</h2><div class="sub mono" style="font-size:13px">{% for m in models %}{{m.name}} · {{'{:,}'.format(m.total_params|int)}} params<br>{% else %}None yet.{% endfor %}</div>
+<script>
+const seed=[`import os, time
+from es_common import esmoe
+cfg = esmoe.plan(2e6)   # byte-level MoE, about 2M total params
+print(cfg)`,
+`text = open(esmoe.__file__).read() * 4   # any text works; upload your own data here
+cfg = esmoe.train_torch("model", cfg, text, steps=min(400, int(os.environ["ES_PLAN_MAX_STEPS"])), threads=2)
+print("final loss", cfg["train"]["loss_history"][-1], "train tok/s", cfg["train"]["train_tok_per_s"])`];
+const cells=document.getElementById('cells'),out=document.getElementById('out'),st=document.getElementById('st'),rb=document.getElementById('run'),sb=document.getElementById('stop');let job=null;
+function add(t=''){const d=document.createElement('div');d.className='cell';d.innerHTML='<div class="n">['+(cells.children.length+1)+']</div><textarea spellcheck="false"></textarea>';d.querySelector('textarea').value=t;cells.appendChild(d)}
+seed.forEach(add);document.getElementById('add').onclick=()=>add();
+rb.onclick=async()=>{out.textContent='';const r=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('name').value,cells:[...cells.querySelectorAll('textarea')].map(t=>t.value)})});
+ const jr=await r.json();if(!r.ok){out.textContent=jr.error||'error';return}job=jr.job_id;st.textContent='running · job '+job;rb.disabled=true;sb.disabled=false;
+ const es=new EventSource('/api/logs/'+job);es.onmessage=e=>{out.textContent+=JSON.parse(e.data)+'\n';out.scrollTop=out.scrollHeight};
+ es.addEventListener('done',()=>{es.close();st.textContent='finished · job '+job;rb.disabled=false;sb.disabled=true})};
+sb.onclick=()=>fetch('/api/stop/'+job,{method:'POST'});
+</script>{% endblock %}
